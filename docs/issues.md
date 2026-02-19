@@ -206,3 +206,39 @@
 **Причина:** Параллельная реализация в разных модулях (`menu.py` и `statistics.py`).
 
 **Решение:** (1) Удален дублирующий обработчик из `bot/handlers/menu.py`. (2) В `bot/handlers/statistics.py` callback изменен на `screen:stats` и установлена клавиатура возврата в меню `back_to_menu_keyboard()`. Файлы: `bot/handlers/menu.py`, `bot/handlers/statistics.py`.
+
+---
+
+## [ISSUE-016] Несовместимость timezone-aware и naive datetime при создании задачи
+
+**Статус:** Закрыто
+
+**Описание:** При создании новой задачи после ввода названия и выбора даты/времени возникала ошибка `can't subtract offset-naive and offset-aware datetimes`. Inline-кнопки выбора даты и времени не работали. Ошибка проявлялась при попытке сохранить задачу в БД.
+
+**Причина:** Функция `parse_deadline` возвращает timezone-aware datetime (с `tzinfo=ZoneInfo('UTC')`), а модель `Task` использует `TIMESTAMP WITHOUT TIME ZONE` с дефолтным значением `datetime.utcnow()` (naive datetime). При вставке в БД asyncpg не может обработать смешивание aware и naive datetime в одном запросе.
+
+**Решение:** В функции `create_task` (database/task_repo.py) добавлено удаление tzinfo из deadline перед созданием объекта Task: `if deadline.tzinfo is not None: deadline = deadline.replace(tzinfo=None)`. Файл: `database/task_repo.py`.
+
+---
+
+## [ISSUE-017] Отсутствует relationship Task.user для selectinload
+
+**Статус:** Закрыто
+
+**Описание:** При проверке дедлайнов планировщик падал с ошибкой `AttributeError: type object 'Task' has no attribute 'user'`. Функции `get_overdue_tasks` и `get_tasks_for_reminder` используют `selectinload(Task.user)`, но relationship не был определён в модели.
+
+**Причина:** В модели `Task` отсутствовало определение relationship к модели `User`, хотя код репозитория использовал `selectinload(Task.user)` для жадной загрузки связанного пользователя.
+
+**Решение:** В модель `Task` добавлен relationship: `user = relationship("User", backref="tasks")`. Также добавлен импорт `relationship` из `sqlalchemy.orm`. Файл: `database/models.py`.
+
+---
+
+## [ISSUE-018] Сравнение naive и aware datetime в format_remaining_short
+
+**Статус:** Закрыто
+
+**Описание:** При нажатии на кнопку "Мои задачи" возникала ошибка `TypeError: can't compare offset-naive and offset-aware datetimes`. Функция `format_remaining_short` использовала `get_now_utc()` (timezone-aware), а `deadline` из БД — naive datetime.
+
+**Причина:** В `bot/time_utils.py` функции `format_remaining` и `format_remaining_short` использовали `get_now_utc()`, возвращающую timezone-aware datetime, для сравнения с `deadline` из БД, который хранится как naive UTC datetime.
+
+**Решение:** В функциях `format_remaining` и `format_remaining_short` заменено использование `get_now_utc()` на `datetime.utcnow()` для корректного сравнения с naive datetime из БД. Также в `format_deadline_date` добавлена проверка и добавление tzinfo к naive datetime перед конвертацией в локальный часовой пояс. Файл: `bot/time_utils.py`.

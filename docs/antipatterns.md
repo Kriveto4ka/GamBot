@@ -89,3 +89,51 @@
 
 **Решение:** Либо избегать использования сложных Unicode-символов в консольном выводе, либо добавить в начало скриптов инициализацию, обеспечивающую корректную работу с UTF-8 в консоли.
 
+---
+
+## [AP-009] Неполный regex для парсинга дней в deadline_parser
+
+**Описание:** В `bot/deadline_parser.py` regex для парсинга "через N дней" был `r'через\s+(\d+)\s+дн'`, что не соответствовало полному слову "день" (только "дн"). При вводе "через 1 день" парсер возвращал `None`, хотя "через 2 дня" и "через 5 дней" работали корректно.
+
+**Статус:** закрыто.
+
+**Причина:** Regex `дн` соответствовал только началам слов "дня", "дней", но не полному слову "день".
+
+**Решение:** Regex изменён на `r'через\s+(\d+)\s+(дн|день)'` для поддержки всех вариантов написания. Файл: `bot/deadline_parser.py`.
+
+---
+
+## [AP-010] Смешивание timezone-aware и naive datetime
+
+**Описание:** При сохранении задачи в БД возникала ошибка `can't subtract offset-naive and offset-aware datetimes`. Функция `parse_deadline` возвращает datetime с tzinfo, а модель использует `TIMESTAMP WITHOUT TIME ZONE` с naive datetime по умолчанию.
+
+**Статус:** закрыто.
+
+**Причина:** Несогласованность между парсером дедлайнов (возвращает aware datetime) и моделью БД (ожидает naive datetime). asyncpg не может обработать смешивание aware и naive datetime в одном SQL-запросе.
+
+**Решение:** В функции `create_task` добавлено удаление tzinfo перед сохранением: `if deadline.tzinfo is not None: deadline = deadline.replace(tzinfo=None)`. Альтернативное решение — использовать `TIMESTAMP WITH TIME ZONE` в модели. Файл: `database/task_repo.py`.
+
+---
+
+## [AP-011] Использование selectinload для несуществующего relationship
+
+**Описание:** В `database/task_repo.py` функции `get_overdue_tasks` и `get_tasks_for_reminder` используют `selectinload(Task.user)`, но relationship не был определён в модели `Task`. Это приводило к `AttributeError: type object 'Task' has no attribute 'user'`.
+
+**Статус:** закрыто.
+
+**Причина:** Код репозитория был написан с предположением о наличии relationship, но модель не содержала его определения.
+
+**Решение:** В модель `Task` добавлен relationship: `user = relationship("User", backref="tasks")`. Также добавлен импорт `relationship` из `sqlalchemy.orm`. Файл: `database/models.py`.
+
+---
+
+## [AP-012] Сравнение naive и aware datetime в функциях форматирования
+
+**Описание:** В `bot/time_utils.py` функции `format_remaining` и `format_remaining_short` использовали `get_now_utc()` (возвращает timezone-aware datetime) для сравнения с `deadline` из БД, который хранится как naive UTC datetime. Это приводило к `TypeError: can't compare offset-naive and offset-aware datetimes`.
+
+**Статус:** закрыто.
+
+**Причина:** Несогласованность между источниками времени: `get_now_utc()` возвращает aware datetime, а БД хранит naive datetime.
+
+**Решение:** Заменено использование `get_now_utc()` на `datetime.utcnow()` в функциях сравнения. В `format_deadline_date` добавлено приведение naive datetime к aware перед `astimezone()`. Файл: `bot/time_utils.py`.
+
